@@ -1,9 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, ops::Deref};
 
 use godot::prelude::*;
-use owning_ref::{OwningHandle, StableAddress};
-
-use crate::my_gd_ref::{MyGd, MyGdRef};
 
 thread_local! {
     static DI_REGISTRY: RefCell<HashMap<InstanceId, (Gd<Node>, Gd<DiContext>)>> =
@@ -92,18 +89,6 @@ impl DiContext {
             );
         }
     }
-
-    pub fn get_nearest_bound<T>(node: Gd<T>) -> impl Deref<Target = DiContext> + StableAddress
-    where
-        T: GodotClass + Inherits<Node>,
-    {
-        let context = DiContext::get_nearest(&node).unwrap();
-        fn internal_borrow<'b>(it: *const Gd<DiContext>) -> MyGdRef<'b, DiContext> {
-            let it = unsafe { &*it };
-            MyGdRef::new(it.bind())
-        }
-        OwningHandle::new_with_fn(MyGd::new(context), &internal_borrow)
-    }
 }
 
 #[godot_api]
@@ -157,7 +142,7 @@ impl DiContext {
         id: GString,
     ) {
         if !self.verbose_logging_name.chars_checked().is_empty() {
-            ds_lib::log!(
+            godot_print!(
                 "Registering node of type {} and id {} to context {}",
                 type_name,
                 id,

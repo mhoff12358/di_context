@@ -7,4 +7,4 @@ edition = "2021"
 crate-type = ["rlib"]
 
 [dependencies]
-godot = "*"
+godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }

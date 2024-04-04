@@ -20,7 +20,54 @@ pub struct DiRegistration {
 }
 
 #[godot_api]
-impl DiRegistration {}
+impl DiRegistration {
+    pub fn register(
+        node_to_register: &Gd<Node>,
+        type_name: &GString,
+        id: &GString,
+        register_into_own_context: bool,
+    ) {
+        let context = if register_into_own_context {
+            DiContext::get_nearest(node_to_register)
+        } else {
+            DiContext::get_nearest_exclude_self(node_to_register)
+        };
+        if let Some(mut context) = context {
+            if type_name.chars_checked().is_empty() {
+                context
+                    .bind_mut()
+                    .register_node(node_to_register.clone(), id.clone());
+            } else {
+                context.bind_mut().register_with_type(
+                    node_to_register,
+                    type_name.clone(),
+                    id.clone(),
+                );
+            }
+        } else {
+            godot_print!("Tried to register a node with no context in its parentage.");
+        }
+    }
+
+    pub fn register_auto_type(
+        node_to_register: &Gd<Node>,
+        id: &GString,
+        register_into_own_context: bool,
+    ) {
+        let context = if register_into_own_context {
+            DiContext::get_nearest(node_to_register)
+        } else {
+            DiContext::get_nearest_exclude_self(node_to_register)
+        };
+        if let Some(mut context) = context {
+            context
+                .bind_mut()
+                .register_node(node_to_register.clone(), id.clone());
+        } else {
+            godot_print!("Tried to register a node with no context in its parentage.");
+        }
+    }
+}
 
 #[godot_api]
 impl INode for DiRegistration {
@@ -36,26 +83,12 @@ impl INode for DiRegistration {
 
     fn enter_tree(&mut self) {
         let parent = self.base().get_parent().unwrap();
-        let context = if self.register_into_own_context {
-            DiContext::get_nearest(&parent)
-        } else {
-            DiContext::get_nearest_exclude_self(&parent)
-        };
-        if let Some(mut context) = context {
-            if self.type_name.chars_checked().is_empty() {
-                context
-                    .bind_mut()
-                    .register_node(parent.clone(), self.id.clone());
-            } else {
-                context.bind_mut().register_with_type(
-                    &parent,
-                    self.type_name.clone(),
-                    self.id.clone(),
-                );
-            }
-        } else {
-            godot_print!("Tried to register a node with no context in its parentage.");
-        }
+        DiRegistration::register(
+            &parent,
+            &self.type_name,
+            &self.id,
+            self.register_into_own_context,
+        );
         self.to_gd().queue_free();
     }
 }

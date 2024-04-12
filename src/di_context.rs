@@ -2,6 +2,8 @@ use std::{cell::RefCell, collections::HashMap, ops::Deref};
 
 use godot::prelude::*;
 
+use crate::multi_registration::{get_canonical_name, MultiregistrationTrait};
+
 thread_local! {
     static DI_REGISTRY: RefCell<HashMap<InstanceId, (Gd<Node>, Gd<DiContext>)>> =
         RefCell::new(HashMap::default());
@@ -56,9 +58,15 @@ fn clear_di_context(context: &Gd<DiContext>) {
 pub struct DiContext {
     parent_context: Option<Gd<DiContext>>,
     registered_nodes: HashMap<(GString, GString), Gd<Node>>,
+    multiregistered_nodes: HashMap<&'static str, Vec<Gd<Node>>>,
+
+    children_to_search_for_multiregistered_nodes: HashMap<&'static str, Vec<InstanceId>>,
 
     #[export]
     verbose_logging_name: GString,
+
+    #[export]
+    re_multiregister_in_parent: Array<GString>,
 
     base: Base<Node>,
 }
@@ -169,6 +177,61 @@ impl DiContext {
         self.register_with_type(node, type_name, id);
     }
 
+    pub fn multiregister(&mut self, node: Gd<Node>, key: &'static str) {
+        self.multiregistered_nodes
+            .entry(key)
+            .or_default()
+            .push(node);
+    }
+
+    pub fn multiregister_auto_type<T: MultiregistrationTrait + Inherits<Node> + ?Sized>(
+        &mut self,
+        node: impl Deref<Target = Gd<T>>,
+    ) {
+        self.multiregister(node.clone().upcast(), T::MULTIREGISTRATION_KEY);
+    }
+
+    fn get_all_without_searching_parent<T: MultiregistrationTrait + ?Sized>(
+        &self,
+        results: &mut Vec<Gd<Node>>,
+        excluded_child: Option<InstanceId>,
+    ) {
+        if let Some(self_nodes) = self.multiregistered_nodes.get(T::MULTIREGISTRATION_KEY) {
+            results.extend_from_slice(&self_nodes);
+        }
+        if let Some(children_to_check) = self
+            .children_to_search_for_multiregistered_nodes
+            .get(T::MULTIREGISTRATION_KEY)
+        {
+            for child in children_to_check.iter() {
+                if Some(*child) != excluded_child {
+                    Gd::<DiContext>::from_instance_id(*child)
+                        .bind()
+                        .get_all_without_searching_parent::<T>(results, None);
+                }
+            }
+        }
+    }
+
+    fn get_all_impl<T: MultiregistrationTrait + ?Sized>(
+        &self,
+        results: &mut Vec<Gd<Node>>,
+        excluded_child: Option<InstanceId>,
+    ) {
+        self.get_all_without_searching_parent::<T>(results, excluded_child);
+        if let Some(parent_context) = self.parent_context.as_ref() {
+            parent_context
+                .bind()
+                .get_all_impl::<T>(results, Some(self.base().instance_id_unchecked()));
+        };
+    }
+
+    pub fn get_all<T: MultiregistrationTrait + ?Sized>(&self) -> Vec<Gd<Node>> {
+        let mut results = Vec::new();
+        self.get_all_impl::<T>(&mut results, None);
+        return results;
+    }
+
     pub fn get_context<T: Inherits<Node> + GodotClass>(
         node: impl Deref<Target = Gd<T>>,
     ) -> Option<Gd<DiContext>> {
@@ -220,6 +283,20 @@ impl DiContext {
     pub fn get_nearest_to_node_exclude_self(node: Gd<Node>) -> Option<Gd<DiContext>> {
         Self::get_nearest_exclude_self(&node)
     }
+
+    fn add_child_reregistration(
+        &mut self,
+        child_id: InstanceId,
+        child_reregistrations: &Array<GString>,
+    ) {
+        for type_name in child_reregistrations.iter_shared() {
+            let canonical_name = get_canonical_name(&type_name);
+            self.children_to_search_for_multiregistered_nodes
+                .entry(canonical_name)
+                .or_default()
+                .push(child_id);
+        }
+    }
 }
 
 #[godot_api]
@@ -228,7 +305,10 @@ impl INode for DiContext {
         Self {
             verbose_logging_name: "".into(),
             parent_context: None,
+            children_to_search_for_multiregistered_nodes: Default::default(),
+            re_multiregister_in_parent: Array::new(),
             registered_nodes: Default::default(),
+            multiregistered_nodes: Default::default(),
             base,
         }
     }
@@ -236,9 +316,15 @@ impl INode for DiContext {
     fn ready(&mut self) {}
 
     fn enter_tree(&mut self) {
+        let instance_id = self.base().instance_id_unchecked();
         let parent = self.base().get_parent().unwrap();
         insert_di_context(&parent, self.base().clone().cast());
         self.parent_context = Self::get_nearest_exclude_self(&parent);
+        if let Some(parent_context) = self.parent_context.as_mut() {
+            parent_context
+                .bind_mut()
+                .add_child_reregistration(instance_id, &self.re_multiregister_in_parent);
+        }
     }
 
     fn exit_tree(&mut self) {

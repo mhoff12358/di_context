@@ -1,6 +1,10 @@
-use godot::builtin::GString;
+use godot::{
+    builtin::GString,
+    engine::Node,
+    obj::{bounds::DeclUser, GodotClass, Inherits},
+};
 
-pub trait MultiregistrationTrait {
+pub trait MultiregistrationTrait: Inherits<Node> + GodotClass<Declarer = DeclUser> {
     const MULTIREGISTRATION_KEY: &'static str;
 }
 
@@ -31,7 +35,7 @@ inventory::collect!(MultiregistrationKey);
 #[macro_export]
 macro_rules! multi_register {
     ($registration_key:expr, $RegistrationType:ident $body:tt) => {
-        pub trait $RegistrationType
+        pub trait $RegistrationType: ::dicontext::godot::obj::Inherits<::dicontext::godot::engine::Node> + ::dicontext::godot::obj::GodotClass<Declarer = ::dicontext::godot::obj::bounds::DeclUser>
             $body
 
         impl ::dicontext::multi_registration::MultiregistrationTrait for dyn $RegistrationType {

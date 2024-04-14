@@ -32,14 +32,14 @@ impl DiMultiRegistration {
             DiContext::get_nearest_exclude_self(node_to_register)
         };
         if let Some(mut context) = context {
-            let canonical_type_name = if type_name.chars_checked().is_empty() {
-                get_canonical_name(&node_to_register.get_class())
+            let type_name = if type_name.chars_checked().is_empty() {
+                node_to_register.get_class()
             } else {
-                get_canonical_name(&type_name)
+                type_name.clone()
             };
             context
                 .bind_mut()
-                .multiregister(node_to_register.clone(), canonical_type_name);
+                .multiregister(node_to_register.clone(), type_name);
         } else {
             godot_print!("Tried to register a node with no context in its parentage.");
         }

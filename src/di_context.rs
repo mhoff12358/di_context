@@ -58,9 +58,9 @@ fn clear_di_context(context: &Gd<DiContext>) {
 pub struct DiContext {
     parent_context: Option<Gd<DiContext>>,
     registered_nodes: HashMap<(GString, GString), Gd<Node>>,
-    multiregistered_nodes: HashMap<&'static str, Vec<Gd<Node>>>,
+    multiregistered_nodes: HashMap<GString, Vec<Gd<Node>>>,
 
-    children_to_search_for_multiregistered_nodes: HashMap<&'static str, Vec<InstanceId>>,
+    children_to_search_for_multiregistered_nodes: HashMap<GString, Vec<InstanceId>>,
 
     #[export]
     verbose_logging_name: GString,
@@ -177,31 +177,32 @@ impl DiContext {
         self.register_with_type(node, type_name, id);
     }
 
-    pub fn multiregister(&mut self, node: Gd<Node>, key: &'static str) {
+    pub fn multiregister(&mut self, node: Gd<Node>, key: GString) {
         self.multiregistered_nodes
             .entry(key)
             .or_default()
             .push(node);
     }
 
-    pub fn multiregister_auto_type<T: MultiregistrationTrait + Inherits<Node> + ?Sized>(
+    pub fn multiregister_auto_type<T: Inherits<Node> + GodotClass>(
         &mut self,
         node: impl Deref<Target = Gd<T>>,
     ) {
-        self.multiregister(node.clone().upcast(), T::MULTIREGISTRATION_KEY);
+        self.multiregister(node.clone().upcast(), T::class_name().to_gstring());
     }
 
-    fn get_all_without_searching_parent<T: MultiregistrationTrait + ?Sized>(
+    fn get_all_without_searching_parent<T: Inherits<Node> + GodotClass>(
         &self,
-        results: &mut Vec<Gd<Node>>,
+        results: &mut Vec<Gd<T>>,
         excluded_child: Option<InstanceId>,
     ) {
-        if let Some(self_nodes) = self.multiregistered_nodes.get(T::MULTIREGISTRATION_KEY) {
-            results.extend_from_slice(&self_nodes);
+        let class_name = &T::class_name().to_gstring();
+        if let Some(self_nodes) = self.multiregistered_nodes.get(class_name) {
+            results.extend(self_nodes.iter().map(|node| node.clone().cast::<T>()));
         }
         if let Some(children_to_check) = self
             .children_to_search_for_multiregistered_nodes
-            .get(T::MULTIREGISTRATION_KEY)
+            .get(class_name)
         {
             for child in children_to_check.iter() {
                 if Some(*child) != excluded_child {
@@ -213,9 +214,9 @@ impl DiContext {
         }
     }
 
-    fn get_all_impl<T: MultiregistrationTrait + ?Sized>(
+    fn get_all_impl<T: Inherits<Node> + GodotClass>(
         &self,
-        results: &mut Vec<Gd<Node>>,
+        results: &mut Vec<Gd<T>>,
         excluded_child: Option<InstanceId>,
     ) {
         self.get_all_without_searching_parent::<T>(results, excluded_child);
@@ -226,7 +227,7 @@ impl DiContext {
         };
     }
 
-    pub fn get_all<T: MultiregistrationTrait + ?Sized>(&self) -> Vec<Gd<Node>> {
+    pub fn get_all<T: Inherits<Node> + GodotClass>(&self) -> Vec<Gd<T>> {
         let mut results = Vec::new();
         self.get_all_impl::<T>(&mut results, None);
         return results;
@@ -290,9 +291,8 @@ impl DiContext {
         child_reregistrations: &Array<GString>,
     ) {
         for type_name in child_reregistrations.iter_shared() {
-            let canonical_name = get_canonical_name(&type_name);
             self.children_to_search_for_multiregistered_nodes
-                .entry(canonical_name)
+                .entry(type_name)
                 .or_default()
                 .push(child_id);
         }

@@ -53,13 +53,29 @@ fn clear_di_context(context: &Gd<DiContext>) {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct RegistrationKey {
+    pub type_name: GString,
+    pub id: GString,
+}
+
+#[derive(GodotClass)]
+#[class(base=Resource, init)]
+pub struct ReRegistration {
+    #[export]
+    type_name: GString,
+    #[export]
+    id: GString,
+}
+
 #[derive(GodotClass)]
 #[class(base=Node)]
 pub struct DiContext {
     parent_context: Option<Gd<DiContext>>,
-    registered_nodes: HashMap<(GString, GString), Gd<Node>>,
+    registered_nodes: HashMap<RegistrationKey, Gd<Node>>,
     multiregistered_nodes: HashMap<GString, Vec<Gd<Node>>>,
 
+    children_to_search_for_registered_nodes: HashMap<RegistrationKey, Vec<InstanceId>>,
     children_to_search_for_multiregistered_nodes: HashMap<GString, Vec<InstanceId>>,
 
     #[export]
@@ -67,6 +83,9 @@ pub struct DiContext {
 
     #[export]
     re_multiregister_in_parent: Array<GString>,
+
+    #[export]
+    re_register_in_parent: Array<Gd<ReRegistration>>,
 
     base: Base<Node>,
 }
@@ -115,23 +134,60 @@ impl DiContext {
         }
     }
 
+    fn try_get_registered_node_with_id_no_parent_search(
+        &self,
+        key: &RegistrationKey,
+        child_to_ignore: Option<InstanceId>,
+    ) -> Option<Gd<Node>> {
+        if let Some(locally_found) = self.registered_nodes.get(&key) {
+            return Some(locally_found.clone());
+        } else {
+            if let Some(children_to_search) = self.children_to_search_for_registered_nodes.get(&key)
+            {
+                for child_to_search in children_to_search.iter() {
+                    if Some(*child_to_search) != child_to_ignore {
+                        let child_search = Gd::<DiContext>::from_instance_id(*child_to_search)
+                            .bind()
+                            .try_get_registered_node_with_id_no_parent_search(key, child_to_ignore);
+                        if child_search.is_some() {
+                            return child_search;
+                        }
+                    }
+                }
+            }
+        }
+        return None;
+    }
+
+    fn try_get_registered_node_with_id_impl(
+        &self,
+        key: &RegistrationKey,
+        child_to_ignore: Option<InstanceId>,
+    ) -> Option<Gd<Node>> {
+        let search_self_and_children =
+            self.try_get_registered_node_with_id_no_parent_search(&key, child_to_ignore);
+        if search_self_and_children.is_some() {
+            return search_self_and_children;
+        } else {
+            if let Some(parent_context) = self.parent_context.as_ref() {
+                return parent_context.bind().try_get_registered_node_with_id_impl(
+                    key,
+                    Some(self.base().instance_id_unchecked()),
+                );
+            } else {
+                return None;
+            }
+        }
+    }
+
     #[func]
     pub fn try_get_registered_node_with_id(
         &self,
         type_name: GString,
         id: GString,
     ) -> Option<Gd<Node>> {
-        if let Some(locally_found) = self.registered_nodes.get(&(type_name.clone(), id.clone())) {
-            return Some(locally_found.clone());
-        } else {
-            if let Some(parent_context) = self.parent_context.as_ref() {
-                return parent_context
-                    .bind()
-                    .try_get_registered_node_with_id(type_name, id);
-            } else {
-                return None;
-            }
-        }
+        let key = RegistrationKey { type_name, id };
+        return self.try_get_registered_node_with_id_impl(&key, None);
     }
 
     #[func]
@@ -158,7 +214,7 @@ impl DiContext {
             );
         }
         self.registered_nodes
-            .insert((type_name, id), node.clone().upcast());
+            .insert(RegistrationKey { type_name, id }, node.clone().upcast());
     }
 
     pub fn register<T: Inherits<Node> + GodotClass>(
@@ -288,9 +344,20 @@ impl DiContext {
     fn add_child_reregistration(
         &mut self,
         child_id: InstanceId,
-        child_reregistrations: &Array<GString>,
+        child_reregistrations: &Array<Gd<ReRegistration>>,
+        child_remultiregistrations: &Array<GString>,
     ) {
-        for type_name in child_reregistrations.iter_shared() {
+        for reregistration in child_reregistrations.iter_shared() {
+            let reregistration = reregistration.bind();
+            self.children_to_search_for_registered_nodes
+                .entry(RegistrationKey {
+                    type_name: reregistration.type_name.clone(),
+                    id: reregistration.id.clone(),
+                })
+                .or_default()
+                .push(child_id);
+        }
+        for type_name in child_remultiregistrations.iter_shared() {
             self.children_to_search_for_multiregistered_nodes
                 .entry(type_name)
                 .or_default()
@@ -306,7 +373,9 @@ impl INode for DiContext {
             verbose_logging_name: "".into(),
             parent_context: None,
             children_to_search_for_multiregistered_nodes: Default::default(),
+            children_to_search_for_registered_nodes: Default::default(),
             re_multiregister_in_parent: Array::new(),
+            re_register_in_parent: Array::new(),
             registered_nodes: Default::default(),
             multiregistered_nodes: Default::default(),
             base,
@@ -321,9 +390,11 @@ impl INode for DiContext {
         insert_di_context(&parent, self.base().clone().cast());
         self.parent_context = Self::get_nearest_exclude_self(&parent);
         if let Some(parent_context) = self.parent_context.as_mut() {
-            parent_context
-                .bind_mut()
-                .add_child_reregistration(instance_id, &self.re_multiregister_in_parent);
+            parent_context.bind_mut().add_child_reregistration(
+                instance_id,
+                &self.re_register_in_parent,
+                &self.re_multiregister_in_parent,
+            );
         }
     }
 

@@ -1,7 +1,5 @@
 use godot::prelude::*;
 
-use crate::multi_registration::get_canonical_name;
-
 use super::di_context::DiContext;
 
 #[derive(GodotClass)]

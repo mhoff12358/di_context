@@ -2,8 +2,6 @@ use std::{cell::RefCell, collections::HashMap, ops::Deref};
 
 use godot::prelude::*;
 
-use crate::multi_registration::{get_canonical_name, MultiregistrationTrait};
-
 thread_local! {
     static DI_REGISTRY: RefCell<HashMap<InstanceId, (Gd<Node>, Gd<DiContext>)>> =
         RefCell::new(HashMap::default());

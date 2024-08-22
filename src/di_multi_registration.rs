@@ -30,7 +30,7 @@ impl DiMultiRegistration {
             DiContext::get_nearest_exclude_self(node_to_register)
         };
         if let Some(mut context) = context {
-            let type_name = if type_name.chars_checked().is_empty() {
+            let type_name = if type_name.chars().is_empty() {
                 node_to_register.get_class()
             } else {
                 type_name.clone()

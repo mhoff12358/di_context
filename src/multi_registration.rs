@@ -1,6 +1,6 @@
 use godot::{
     builtin::GString,
-    engine::Node,
+    classes::Node,
     obj::{bounds::DeclUser, GodotClass, Inherits},
 };
 

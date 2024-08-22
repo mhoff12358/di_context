@@ -203,7 +203,7 @@ impl DiContext {
         type_name: GString,
         id: GString,
     ) {
-        if !self.verbose_logging_name.chars_checked().is_empty() {
+        if !self.verbose_logging_name.chars().is_empty() {
             godot_print!(
                 "Registering node of type {} and id {} to context {}",
                 type_name,

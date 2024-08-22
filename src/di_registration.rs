@@ -33,7 +33,7 @@ impl DiRegistration {
             DiContext::get_nearest_exclude_self(node_to_register)
         };
         if let Some(mut context) = context {
-            if type_name.chars_checked().is_empty() {
+            if type_name.chars().is_empty() {
                 context
                     .bind_mut()
                     .register_node(node_to_register.clone(), id.clone());

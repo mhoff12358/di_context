@@ -57,6 +57,15 @@ struct RegistrationKey {
     pub id: GString,
 }
 
+impl RegistrationKey {
+    pub fn with_different_id(&self, new_id: GString) -> Self {
+        RegistrationKey {
+            type_name: self.type_name.clone(),
+            id: new_id,
+        }
+    }
+}
+
 #[derive(GodotClass)]
 #[class(base=Resource, init)]
 pub struct ReRegistration {
@@ -64,6 +73,23 @@ pub struct ReRegistration {
     type_name: GString,
     #[export]
     id: GString,
+    #[export]
+    new_id: GString,
+}
+
+impl ReRegistration {
+    pub fn optional_new_id(&self) -> Option<GString> {
+        if self.new_id.is_empty() {
+            return None;
+        } else {
+            return Some(self.new_id.clone());
+        }
+    }
+}
+
+struct ReRegistrationLookup {
+    child_context_id: InstanceId,
+    id_to_search_for: GString,
 }
 
 #[derive(GodotClass)]
@@ -73,7 +99,7 @@ pub struct DiContext {
     registered_nodes: HashMap<RegistrationKey, Gd<Node>>,
     multiregistered_nodes: HashMap<GString, Vec<Gd<Node>>>,
 
-    children_to_search_for_registered_nodes: HashMap<RegistrationKey, Vec<InstanceId>>,
+    children_to_search_for_registered_nodes: HashMap<RegistrationKey, Vec<ReRegistrationLookup>>,
     children_to_search_for_multiregistered_nodes: HashMap<GString, Vec<InstanceId>>,
 
     #[export]
@@ -143,10 +169,16 @@ impl DiContext {
             if let Some(children_to_search) = self.children_to_search_for_registered_nodes.get(&key)
             {
                 for child_to_search in children_to_search.iter() {
-                    if Some(*child_to_search) != child_to_ignore {
-                        let child_search = Gd::<DiContext>::from_instance_id(*child_to_search)
-                            .bind()
-                            .try_get_registered_node_with_id_no_parent_search(key, child_to_ignore);
+                    if Some(child_to_search.child_context_id) != child_to_ignore {
+                        let child_search =
+                            Gd::<DiContext>::from_instance_id(child_to_search.child_context_id)
+                                .bind()
+                                .try_get_registered_node_with_id_no_parent_search(
+                                    &key.with_different_id(
+                                        child_to_search.id_to_search_for.clone(),
+                                    ),
+                                    child_to_ignore,
+                                );
                         if child_search.is_some() {
                             return child_search;
                         }
@@ -347,13 +379,20 @@ impl DiContext {
     ) {
         for reregistration in child_reregistrations.iter_shared() {
             let reregistration = reregistration.bind();
+            let reregistered_as = match reregistration.optional_new_id() {
+                Some(new_id) => new_id.clone(),
+                None => reregistration.id.clone(),
+            };
             self.children_to_search_for_registered_nodes
                 .entry(RegistrationKey {
                     type_name: reregistration.type_name.clone(),
-                    id: reregistration.id.clone(),
+                    id: reregistered_as.clone(),
                 })
                 .or_default()
-                .push(child_id);
+                .push(ReRegistrationLookup {
+                    child_context_id: child_id,
+                    id_to_search_for: reregistration.id.clone(),
+                });
         }
         for type_name in child_remultiregistrations.iter_shared() {
             self.children_to_search_for_multiregistered_nodes
